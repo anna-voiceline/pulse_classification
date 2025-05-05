@@ -1,0 +1,37 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# PyTorch specific
+*.pt
+*.pth
+*.ckpt
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Project specific
+data/
+results/
