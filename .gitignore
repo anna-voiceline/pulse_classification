@@ -33,5 +33,5 @@ ENV/
 Thumbs.db
 
 # Project specific
-data/
+/data/
 results/
