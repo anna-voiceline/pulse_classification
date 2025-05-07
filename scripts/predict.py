@@ -14,40 +14,17 @@ import logging
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.dataset import InsightDataset
-from models.classifier import InsightClassifier
+from src.data.dataset import InsightDataset
+from src.models.classifier import InsightClassifier
+from src.utils.set_up import parse_output_args
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Predict important insights")
-
-    # Paths
-    parser.add_argument("--model-path", type=str, required=True,
-                        help="Path to trained model")
-    parser.add_argument("--embeddings", type=str, required=True,
-                        help="Path to embeddings to classify")
-    parser.add_argument("--texts", type=str, default=None,
-                        help="Path to texts (optional)")
-    parser.add_argument("--output", type=str, default="predictions.csv",
-                        help="Path to save predictions")
-
-    # Parameters
-    parser.add_argument("--threshold", type=float, default=None,
-                        help="Classification threshold (use model's threshold if not specified)")
-    parser.add_argument("--batch-size", type=int, default=32,
-                        help="Batch size")
-
-    # Miscellaneous
-    parser.add_argument("--cuda", action="store_true",
-                        help="Use CUDA if available")
-
-    return parser.parse_args()
 
 def main():
-    args = parse_args()
+    args = parse_output_args()
 
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
