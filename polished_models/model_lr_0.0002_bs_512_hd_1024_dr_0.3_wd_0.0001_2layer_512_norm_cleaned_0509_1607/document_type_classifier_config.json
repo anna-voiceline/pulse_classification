@@ -1,0 +1,8 @@
+{
+  "class_mapping": {
+    "0": "call",
+    "1": "visit",
+    "2": "other"
+  },
+  "num_classes": 3
+}

@@ -12,4 +12,5 @@ dependencies = [
     "tqdm>=4.65.0",
     "onnx>=1.17.0",
     "onnxscript>=0.2.4",
+    "termine>=0.1.5",
 ]

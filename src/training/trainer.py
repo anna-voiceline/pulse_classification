@@ -8,7 +8,7 @@ from tqdm import tqdm
 import logging
 from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
 
-from utils.plots import plot_confusion_matrix
+from src.utils.plots import plot_confusion_matrix
 
 # Setup logging
 logging.basicConfig(level=logging.INFO,

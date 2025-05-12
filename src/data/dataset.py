@@ -1,10 +1,11 @@
+import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from sklearn.model_selection import train_test_split
 
-from data.preprocessing import normalize_embeddings, standardize_embeddings
-
+from src.data.preprocessing import normalize_embeddings, standardize_embeddings
+from src.data.data_prep import classify_and_save
 
 class InsightDataset(Dataset):
     """
@@ -44,61 +45,110 @@ class InsightDataset(Dataset):
         return item
 
 
-def load_data(positives_path='data/embeddings/positives.npy',
-              negatives_path='data/embeddings/negatives.npy',
-              positive_texts_path=None,
-              negative_texts_path=None,
+def load_data(embeddings_paths: dict[str, str],
+              texts_paths: dict[str, str],
               test_size=0.2,
               val_size=0.1,
               normalize=False,
               standardize=False,
-              random_state=42):
+              random_state=42,
+              label_mapping=None,
+              clean_other=False,
+              other_category='other',
+              logger=None):
     """
-    Load and split the embeddings data into train, validation, and test sets.
+    Load and split embeddings data into train, validation, and test sets with optional cleaning.
+    Supports multi-class classification with any number of classes.
 
     Args:
-        positives_path: Path to the positive embeddings
-        negatives_path: Path to the negative embeddings
-        positive_texts_path: Optional path to positive text data
-        negative_texts_path: Optional path to negative text data
+        embeddings_paths: Dict mapping class labels to embedding file paths
+        texts_paths: Dict mapping class labels to text file paths
         test_size: Proportion of data to use for the test set
         val_size: Proportion of training data to use for validation
         normalize: Whether to apply L2 normalization to embeddings
         standardize: Whether to standardize embeddings using training data stats
         random_state: Random seed for reproducibility
+        label_mapping: Dict mapping original class labels to numeric indices
+        clean_other: Whether to clean and filter the 'other' category data
+        other_category: The key in embeddings_paths that corresponds to the 'other' category
+        logger: Logger instance for logging messages (if None, no logging is performed)
 
     Returns:
-        train_dataset, val_dataset, test_dataset: Three InsightDataset objects
+        train_dataset, val_dataset, test_dataset: Three InsightDataset objects with numeric labels
     """
-    # Load embeddings
-    positive_embeddings = np.load(positives_path)
-    negative_embeddings = np.load(negatives_path)
+    # Initialize lists to store data
+    all_embeddings = []
+    all_labels = []
+    all_texts = [] if texts_paths else None
 
-    # Apply L2 normalization if requested
-    if normalize:
-        positive_embeddings = normalize_embeddings(positive_embeddings)
-        negative_embeddings = normalize_embeddings(negative_embeddings)
+    # Create a mapping from original class labels to their enumerated index values
+    if label_mapping is None:
+        # If no mapping provided, create a default one (enumerate the keys)
+        label_mapping = {label: idx for idx, label in enumerate(embeddings_paths.keys())}
 
-    # Create labels
-    positive_labels = np.ones(len(positive_embeddings))
-    negative_labels = np.zeros(len(negative_embeddings))
+    # Keep track of the mapping for metadata
+    class_to_idx = label_mapping.copy()
 
-    # Combine embeddings data
-    all_embeddings = np.vstack((positive_embeddings, negative_embeddings))
-    all_labels = np.concatenate((positive_labels, negative_labels))
+    # Process each class
+    for class_label, embedding_path in embeddings_paths.items():
+        # Clean the 'other' category if requested
+        if clean_other and class_label == other_category and class_label in texts_paths:
+            logger.info(f"Cleaning '{other_category}' category using data_prep module...")
 
-    # Load text data if provided
-    all_texts = None
-    if positive_texts_path is not None and negative_texts_path is not None:
-        positive_texts = np.load(positive_texts_path, allow_pickle=True)
-        negative_texts = np.load(negative_texts_path, allow_pickle=True)
+            # Use the classify_and_save function from data_prep module
+            # This will create clean and dirty versions of the data
+            temp_output_dir = os.path.join(os.path.dirname(embedding_path), "temp_clean")
+            os.makedirs(temp_output_dir, exist_ok=True)
 
-        # Verify lengths match
-        assert len(positive_texts) == len(positive_embeddings), "Positive texts and embeddings must have same length"
-        assert len(negative_texts) == len(negative_embeddings), "Negative texts and embeddings must have same length"
+            result = classify_and_save(
+                texts_path=texts_paths[class_label],
+                embeddings_path=embedding_path,
+                output_dir=temp_output_dir,
+                save_with_suffix=""
+            )
 
-        # Combine text data
-        all_texts = np.concatenate((positive_texts, negative_texts))
+            # Use the clean version for further processing
+            if result and result['clean_count'] > 0:
+                logger.info(f"Using cleaned version of '{other_category}' with {result['clean_count']} samples")
+                # Update paths to use the clean versions
+                embedding_path = result['clean_embeddings_path']
+                texts_paths[class_label] = result['clean_texts_path']
+            else:
+                logger.warning(f"Cleaning produced no usable samples, using original '{other_category}' data")
+
+        # Load embeddings for this class
+        class_embeddings = np.load(embedding_path)
+
+        # Apply L2 normalization if requested
+        if normalize:
+            class_embeddings = normalize_embeddings(class_embeddings)
+
+        # Map the class label to its numeric index
+        numeric_label = label_mapping.get(class_label, class_label)  # Use mapping or original if not in mapping
+
+        # Create labels for this class
+        class_labels = np.full(len(class_embeddings), numeric_label)
+
+        # Append to our master lists
+        all_embeddings.append(class_embeddings)
+        all_labels.append(class_labels)
+
+        # Handle text data if provided
+        if texts_paths and class_label in texts_paths:
+            class_texts = np.load(texts_paths[class_label], allow_pickle=True)
+
+            # Verify lengths match
+            assert len(class_texts) == len(
+                class_embeddings), f"Texts and embeddings for class {class_label} must have same length"
+
+            if all_texts is not None:
+                all_texts.append(class_texts)
+
+    # Combine all data
+    all_embeddings = np.vstack(all_embeddings)
+    all_labels = np.concatenate(all_labels)
+    if all_texts is not None and len(all_texts) > 0:
+        all_texts = np.concatenate(all_texts)
 
     # Create index arrays for tracking data through splits
     indices = np.arange(len(all_labels))
@@ -124,6 +174,7 @@ def load_data(positives_path='data/embeddings/positives.npy',
     X_val = all_embeddings[val_indices]
     X_test = all_embeddings[test_indices]
 
+    # Standardize embeddings if requested
     if standardize:
         X_train, X_val, X_test = standardize_embeddings(
             X_train, X_val, X_test
@@ -136,10 +187,18 @@ def load_data(positives_path='data/embeddings/positives.npy',
         val_texts = all_texts[val_indices]
         test_texts = all_texts[test_indices]
 
-    # Create datasets with text data
-    train_dataset = InsightDataset(X_train, y_train, texts=train_texts)
-    val_dataset = InsightDataset(X_val, y_val, texts=val_texts)
-    test_dataset = InsightDataset(X_test, y_test, texts=test_texts)
+    # Create datasets with text data and metadata
+    train_dataset = InsightDataset(embeddings=X_train, labels=y_train, texts=train_texts)
+    val_dataset = InsightDataset(embeddings=X_val, labels=y_val, texts=val_texts)
+    test_dataset = InsightDataset(embeddings=X_test, labels=y_test, texts=test_texts)
+
+    # Log class distribution information
+    class_counts = {}
+    for label in np.unique(all_labels):
+        class_name = next((k for k, v in label_mapping.items() if v == label), str(label))
+        class_counts[class_name] = (all_labels == label).sum()
+
+    logger.info(f"Class distribution after processing: {class_counts}")
 
     return train_dataset, val_dataset, test_dataset
 
